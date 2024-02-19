@@ -29,5 +29,12 @@ fn main() {
 
     println!("{number:0>width$}", number=1, width=5);
 
+    println!("One million is written as {}", 1_000_000);
+    println!("One million is written as {}", 1_000_000u32);
+
+    println!("true AND false is {}", true && false);
+    println!("true OR false is {}", true || false);
+    println!("NOT true is {}", !true);
+
     eprintln!("Some error occurred");
 }
