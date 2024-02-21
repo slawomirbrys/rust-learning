@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Error, ErrorKind};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,27 +39,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     /*
         Call http request per each url
     */
-    let mut totals = Stats::new();
-    let client = reqwest::blocking::Client::new();
+    let totals = Arc::new(Mutex::new(Stats::new()));
+    let mut threads = Vec::new();
     for url in urls {
-        let result = match get(&client, &url) {
-            Ok(result) => result,
-            Err(err) => {
-                println!("Url {} couldn't be loaded due to error: {}", url, err);
+        let total = totals.clone();
 
-                return Ok();
-            }
-        };
-        println!("--------------------------------------------------------------------------------");
-        println!("Url {} loaded in {}ms with length of {} and status code {}", url, result.elapsed_time.as_millis(), result.content_length, result.status);
-        println!("Url {} -> {:?}", url, result);
+        // threads.push(std::thread::spawn(move || {
+        // std::thread::spawn(move || -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+        // Result<(), Box<...>>::Ok(())
+        threads.push(std::thread::spawn(move || -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+            let client = reqwest::blocking::Client::new();
+            let result = match get(&client, &url) {
+                Ok(result) => result,
+                Err(_err) =>                   {
+                    println!("Cannot load {} url", url);
+                    Stats::new()
+                }
+            };
+            println!("--------------------------------------------------------------------------------");
+            println!(
+                "Url {} loaded in {}ms with length of {} and status code {}",
+                url,
+                result.elapsed_time.as_millis(),
+                result.content_length,
+                result.status);
+            println!("Url {} -> {:?}", url, result);
 
-        totals.aggregate(&result);
+            //totals.aggregate(&result);
+            total.lock().unwrap().aggregate(&result);
+            Ok(())
+        }));
+    }
+
+    for thread in threads.into_iter(){
+        let _ = thread.join();
     }
 
     /*
         Present totals
      */
+    // when in multiple threads, then unwrap first
+    let totals = totals.lock().unwrap();
     println!("=====================================================================================");
     println!("Total: {:?} ({:.2} bytes/sec)", totals, totals.bytes_per_sec().unwrap_or_default());
 
@@ -106,7 +127,7 @@ impl Stats {
     }
 }
 
-fn get(client: &reqwest::blocking::Client, url: &str) -> Result<Stats, Box<dyn std::error::Error>> {
+fn get(client: &reqwest::blocking::Client, url: &str) -> Result<Stats, Box<dyn std::error::Error + Send + Sync + 'static>> {
     let start = Instant::now();
     let response = client.get(url).send()?;
     let status_code = response.status();
