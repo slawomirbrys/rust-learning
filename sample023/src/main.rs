@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Error, ErrorKind};
 use std::time::{Duration, Instant};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -32,29 +34,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /*
         Call http request per each url
     */
+    let start = Instant::now();
     let mut totals = Stats::new();
+    let client = reqwest::Client::new();
+    let mut requests = FuturesUnordered::new();
     for url in urls {
+        requests.push(get(&client, String::from(url)));
+    }
 
-        let client = reqwest::Client::new();
-        let result = get(&client, &url).await;
-        let result = match result {
-            Ok(result) => result,
-            Err(_err) => {
-                println!("Cannot load {} url", url);
-                Stats::new()
-            }
-        };
+    while let Some(stats) = requests.next().await {
         println!("--------------------------------------------------------------------------------");
-        println!(
-            "Url {} loaded in {}ms with length of {} and status code {}",
-            url,
-            result.elapsed_time.as_millis(),
-            result.content_length,
-            result.status);
-        println!("Url {} -> {:?}", url, result);
+        // println!(
+        //     "Url {} loaded in {}ms with length of {} and status code {}",
+        //     "unknown",
+        //     stats?.elapsed_time.as_millis(),
+        //     stats?.status,
+        //     stats?.content_length);
+        println!("Url {} -> {:?}", "unknown", stats);
 
-        //totals.aggregate(&result);
-        totals.aggregate(&result);
+        totals.aggregate(&stats?);
     }
 
     /*
@@ -62,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
      */
     println!("=====================================================================================");
     println!("Total: {:?} ({:.2} bytes/sec)", totals, totals.bytes_per_sec().unwrap_or_default());
+    println!("Main time: {:?}", start.elapsed());
 
     /*
         Result
@@ -107,7 +106,7 @@ impl Stats {
     }
 }
 
-async fn get(client: &reqwest::Client, url: &str) -> Result<Stats, Box<dyn std::error::Error>> {
+async fn get(client: &reqwest::Client, url: String) -> Result<Stats, Box<dyn std::error::Error>> {
     let start = Instant::now();
     let response = client.get(url).send().await?;
     let status_code = response.status();
